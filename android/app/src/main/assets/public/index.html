@@ -1,0 +1,146 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>PSX Pulse</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#07140e;color:#d6efe2;font:13px/1.45 system-ui,sans-serif}
+header{padding-top:max(8px,env(safe-area-inset-top))!important;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 14px;background:#0a5c36;position:sticky;top:0;z-index:5}header b{font-size:17px}.sp{flex:1}
+input,select,button{background:#0d2c1e;color:#d6efe2;border:1px solid #2a7a52;border-radius:6px;padding:5px 9px;font:inherit}button{cursor:pointer;background:#13854f}button.on{background:#e6b422;color:#111}
+main{display:grid;grid-template-columns:minmax(520px,45%) 1fr;gap:10px;padding:10px}@media(max-width:1100px){main{grid-template-columns:1fr}}
+.card{border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid #ffffff14}
+#wl{background:#0e2a1f;overflow:auto;max-height:calc(100vh - 70px)}table{width:100%;border-collapse:collapse}
+th{text-align:left;color:#7fb89b;position:sticky;top:0;background:#0e2a1f}td,th{padding:5px 6px;white-space:nowrap}
+tbody tr{cursor:pointer;border-top:1px solid #ffffff0d}tr.sel td:first-child{box-shadow:inset 3px 0 #3fe58a}
+.n{text-align:right;font-variant-numeric:tabular-nums}.g{color:#4be28f}.r{color:#ff6b6b}.m{color:#8fb7a2}
+@keyframes fu{from{background:#8dffb8cc;color:#04210f}to{background:transparent}}@keyframes fd{from{background:#ff9d9dcc;color:#2a0505}to{background:transparent}}
+tr.u td.p{animation:fu 1.3s}tr.d td.p{animation:fd 1.3s}
+.bd{padding:2px 9px;border-radius:10px;font-weight:700;color:#fff}.BUY{background:#1faa5e}.SELL{background:#c63d3d}.HOLD{background:#b08a1e}
+#hd{background:#12382a;display:flex;gap:16px;align-items:center;flex-wrap:wrap}#hp{font-size:28px;font-weight:700}
+#cc{background:#0b1d17}#cv{width:100%;height:380px;display:block}#tfs{margin-bottom:6px;display:flex;gap:4px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:700px){.grid{grid-template-columns:1fr}}
+#pl{background:#0f3d3a}#lv{background:#1f2f45}#ind{background:#3a3322}#lg{background:#1c211e;font-size:12px}
+h4{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#9fd9bb}.kv{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #ffffff0f}
+.zone{background:#2ee57a33;border:1px dashed #2ee57a;border-radius:6px;padding:4px 8px;margin:4px 0;font-weight:700}
+</style></head><body>
+<header><b>🌿 PSX Pulse</b><span id="st"></span><span class="sp"></span>
+<input id="ai" placeholder="Add symbol e.g. TRG" size="14"><button id="ab">Add</button><button id="px">Proxy</button><button id="dm">Demo: off</button></header>
+<main>
+<section id="wl" class="card"><table><thead><tr><th>Symbol<th class="n">LTP<th class="n">Chg<th class="n">%<th class="n">High<th class="n">Low<th>Entry zone<th>Signal<th></thead><tbody id="tb"></tbody></table></section>
+<section>
+<div id="hd" class="card"><div><div id="hs" style="font-size:16px;font-weight:700"></div><span id="hp"></span> <span id="hc"></span></div><div id="hr" class="m"></div><span id="hb"></span><span class="sp"></span><label class="m">Horizon <select id="hz"></select></label></div>
+<div id="cc" class="card"><div id="tfs"></div><canvas id="cv"></canvas></div>
+<div class="grid"><div id="pl" class="card"></div><div id="lv" class="card"></div><div id="ind" class="card"></div><div id="lg" class="card"></div></div>
+<p class="m">Analysis tool only, not financial advice. Signals are rule-based and can be wrong; always use your own judgement and risk limits.</p>
+</section></main>
+<script>
+const $=s=>document.querySelector(s),f=v=>v==null||isNaN(v)?'-':v.toFixed(2),sgn=v=>(v>0?'+':'')+v.toFixed(2),nu=s=>parseFloat(String(s).replace(/,/g,''));
+const DEF="AIRLINK,EFERT,FABL,FFC,FFL,GWLC,HCAR,HUBC,IBLHL,LOADS,LUCK,MACTER,MARI,MEBL,MLCF,OGDC,PPL,SAZEW,SYS,WAVES".split(",");
+let S={syms:DEF,proxy:'',demo:false,hz:{}};try{Object.assign(S,JSON.parse(localStorage.getItem('psx_cfg')||'{}'))}catch(e){}
+const save=()=>{try{localStorage.setItem('psx_cfg',JSON.stringify(S))}catch(e){}};
+const BASE='https://dps.psx.com.pk',Q={},H={},sigs={},feed={live:false};let sel=S.syms[0],tf='D',cur=null,idx=0;
+const TF={Intraday:'5m',Swing:'D',Positional:'W'},hzOf=s=>S.hz[s]||'Swing';
+const LOC=!window.Capacitor&&/^https?:$/.test(location.protocol)&&/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const ROUTES=[...(LOC?[u=>'/psx'+u.slice(BASE.length)]:[]),u=>u,u=>'https://corsproxy.io/?url='+encodeURIComponent(u),u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),u=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u)];let route=0,cool=0;const dbg=[];const esc=x=>String(x).replace(/[<>&]/g,'');
+async function get(p){const full=BASE+p;if(Date.now()<cool)throw 0;const list=S.proxy?[u=>S.proxy+encodeURIComponent(u)]:[ROUTES[route],...ROUTES.filter(fn=>fn!=ROUTES[route])];
+ for(const fn of list){try{const r=await fetch(fn(full),{signal:AbortSignal.timeout(7000)});if(!r.ok){dbg.push(fn(full).slice(0,60)+' → HTTP '+r.status);continue}const t=await r.text();if(!t.trim()){dbg.push(fn(full).slice(0,60)+' → empty');continue}route=Math.max(0,ROUTES.indexOf(fn));return t}catch(e){dbg.push(fn(full).slice(0,60)+' → '+(e&&e.message||e))}}if(dbg.length>14)dbg.splice(0,dbg.length-14);cool=Date.now()+8000;throw 0}
+/* ---------- helpers ---------- */
+const hash=s=>[...s].reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,7),base=s=>25+(hash(s)%5000)/10;
+const rng=s=>{let x=s;return()=>(x=(x*1664525+1013904223)%4294967296)/4294967296};
+const pk=t=>new Date(t+18e6).toISOString().slice(0,10);
+function synth(sym){const r=rng(hash(sym)),b=base(sym);const mk=(n,st,v)=>{let p=b,o=[];const now=Math.floor(Date.now()/1e3/st)*st;for(let i=0;i<n;i++){const c=p,ch=(r()-.5)*2*v,op=c/(1+ch),h=Math.max(op,c)*(1+r()*v*.5),l=Math.min(op,c)*(1-r()*v*.5);o.unshift({t:(now-i*st)*1e3,o:op,h,l,c,v:Math.round(r()*1e5)});p=op}return o};return{m5:mk(400,300,.004),d:mk(500,86400,.02)}}
+function bucket(tk,ms){tk.sort((a,b)=>a[0]-b[0]);const o=[];for(const[t,p,v]of tk){const k=Math.floor(t/ms)*ms,l=o[o.length-1];if(l&&l.t==k){l.h=Math.max(l.h,p);l.l=Math.min(l.l,p);l.c=p;l.v+=v||0}else o.push({t:k,o:p,h:p,l:p,c:p,v:v||0})}return o}
+function agg(c,kf){const o=[];for(const x of c){const k=kf(x.t),l=o[o.length-1];if(l&&l.k==k){l.h=Math.max(l.h,x.h);l.l=Math.min(l.l,x.l);l.c=x.c;l.v+=x.v}else o.push({...x,k})}return o}
+/* ---------- DATA AGENT ---------- */
+function demoTick(){const r=Math.random;S.syms.forEach(s=>{let q=Q[s];if(!q){const b=base(s);q=Q[s]={p:b,prev:b*(1+(hash(s)%41-20)/1e3),o:b,h:b,l:b,v:0,dir:0}}
+ q.dir=0;if(r()<.6){const n=q.p*(1+(r()-.5)*.0016);q.dir=Math.sign(n-q.p);q.p=n;q.h=Math.max(q.h,n);q.l=Math.min(q.l,n);q.v+=Math.round(r()*900)}})}
+async function pollQuotes(){
+ if(!S.demo){try{const t=await get('/market-watch'),d=new DOMParser().parseFromString(t,'text/html'),hs=[...d.querySelectorAll('th')].map(x=>x.textContent.trim().toUpperCase()),ix=n=>hs.findIndex(h=>h.startsWith(n));
+  const iS=ix('SYMBOL'),iL=ix('LDCP'),iO=ix('OPEN'),iH=ix('HIGH'),iW=ix('LOW'),iC=ix('CURRENT'),iV=ix('VOLUME');if(iS<0||iC<0){dbg.push('Unexpected page. headers='+hs.join('|')+' rows='+d.querySelectorAll('tbody tr').length+' sample='+t.slice(0,120).replace(/\s+/g,' '));throw 0}let k=0;
+  d.querySelectorAll('tbody tr').forEach(tr=>{const c=[...tr.children].map(x=>x.textContent.trim()),sy=(c[iS]||'').split(/\s/)[0].toUpperCase();if(!S.syms.includes(sy))return;const p=nu(c[iC]);if(!p)return;const o=Q[sy];
+   Q[sy]=Object.assign(o||{},{p,prev:nu(c[iL]),o:nu(c[iO]),h:nu(c[iH]),l:nu(c[iW]),v:nu(c[iV]),dir:o&&p!==o.p?Math.sign(p-o.p):0});k++});
+  if(!k){dbg.push('Parsed 0 of your symbols. headers='+hs.join('|'));throw 0}feed.live=true;feed.n=k;feed.at=Date.now();try{localStorage.setItem('psx_q',JSON.stringify(Q));localStorage.setItem('psx_qt',feed.at)}catch(e){}return}catch(e){feed.live=false;Object.values(Q).forEach(q=>q.dir=0);return}}
+ demoTick()}
+async function loadH(sym,force){const h=H[sym];if(h&&!force&&Date.now()-h.at<(sym==sel?15e3:9e4))return;let m5,d,demo=false;
+ if(!S.demo){try{const[a,b]=await Promise.all([get('/timeseries/int/'+sym),get('/timeseries/eod/'+sym)]),ti=JSON.parse(a).data||[],te=JSON.parse(b).data||[],ms=t=>t<1e12?t*1e3:t;
+  m5=bucket(ti.map(x=>[ms(x[0]),x[1],x[2]]),3e5);d=te.map(x=>{const c=x[1],o=x[3]==null?c:x[3];return{t:ms(x[0]),o,h:Math.max(o,c),l:Math.min(o,c),c,v:x[2]}}).sort((a,b)=>a.t-b.t)}catch(e){m5=null}}
+ if(!m5||!d||!d.length){if(!S.demo)return;const s=synth(sym);m5=s.m5;d=s.d;demo=true}H[sym]={m5,d,at:Date.now(),demo}}
+function cand(s,t){const h=H[s],q=Q[s];if(!h)return[];let d=h.d.slice(-900),m=h.m5.slice(-600);const adj=x=>{x=({...x});x.c=q.p;x.h=Math.max(x.h,q.p);x.l=Math.min(x.l,q.p);return x};
+ if(q&&q.p){if(!d.length||pk(d[d.length-1].t)<pk(Date.now()))d.push({t:Date.now(),o:q.o||q.p,h:q.h||q.p,l:q.l||q.p,c:q.p,v:0});else d[d.length-1]=adj(d[d.length-1]);if(m.length)m[m.length-1]=adj(m[m.length-1])}
+ return t=='5m'?m:t=='1H'?agg(m,x=>Math.floor(x/36e5)):t=='D'?d:t=='W'?agg(d,x=>Math.floor((x/864e5+3)/7)):agg(d,x=>{const D=new Date(x);return D.getFullYear()*12+D.getMonth()})}
+/* ---------- TECHNICAL AGENT ---------- */
+const sma=(a,n)=>a.map((_,i)=>i<n-1?null:a.slice(i-n+1,i+1).reduce((x,y)=>x+y)/n);
+const ema=(a,n)=>{const k=2/(n+1);let p=a[0];return a.map((x,i)=>i?(p=x*k+p*(1-k)):p)};
+function rsi(c,n=14){let g=0,l=0;for(let i=1;i<=n&&i<c.length;i++){const d=c[i]-c[i-1];d>0?g+=d:l-=d}g/=n;l/=n;for(let i=n+1;i<c.length;i++){const d=c[i]-c[i-1];g=(g*(n-1)+Math.max(d,0))/n;l=(l*(n-1)+Math.max(-d,0))/n}return l?100-100/(1+g/l):100}
+function adx(C,n=14){if(C.length<2*n+2)return{adx:0,pdi:0,mdi:0,atr:0};let tr=0,pd=0,md=0,A=null,dxs=[],PI=0,MI=0;
+ for(let i=1;i<C.length;i++){const x=C[i],p=C[i-1],t=Math.max(x.h-x.l,Math.abs(x.h-p.c),Math.abs(x.l-p.c)),u=x.h-p.h,d=p.l-x.l,P=u>d&&u>0?u:0,M=d>u&&d>0?d:0;
+  if(i<=n){tr+=t;pd+=P;md+=M}else{tr=tr-tr/n+t;pd=pd-pd/n+P;md=md-md/n+M}
+  if(i>=n){PI=100*pd/tr;MI=100*md/tr;const dx=100*Math.abs(PI-MI)/((PI+MI)||1);dxs.push(dx);if(dxs.length==n)A=dxs.reduce((a,b)=>a+b)/n;else if(dxs.length>n)A=(A*(n-1)+dx)/n}}
+ return{adx:A||0,pdi:PI,mdi:MI,atr:tr/n}}
+function pattern(C){const n=C.length,x=C[n-1],p=C[n-2],r=x.h-x.l||1e-9,b=Math.abs(x.c-x.o),lo=Math.min(x.o,x.c)-x.l,up=x.h-Math.max(x.o,x.c);
+ if(p.c<p.o&&x.c>x.o&&x.o<=p.c&&x.c>=p.o)return['Bullish engulfing',1.5];if(p.c>p.o&&x.c<x.o&&x.o>=p.c&&x.c<=p.o)return['Bearish engulfing',-1.5];
+ if(b<.1*r)return['Doji (indecision)',0];if(lo>=2*b&&up<=b)return['Hammer (bullish)',1];if(up>=2*b&&lo<=b)return['Shooting star (bearish)',-1];return null}
+/* ---------- LEVELS + RISK + ADVISOR AGENTS ---------- */
+function analyze(C,hz){if(C.length<30)return null;
+ const c=C.map(x=>x.c),n=c.length,P=c[n-1],s20=sma(c,20),s50=sma(c,50),e12=ema(c,12),e26=ema(c,26),ml=e12.map((x,i)=>x-e26[i]),sg=ema(ml,9),hs=ml.map((x,i)=>x-sg[i]);
+ const R=rsi(c),X=adx(C),atr=X.atr||P*.01,L=[];let sc=0;const add=(v,t)=>{sc+=v;L.push((v>0?'+':'')+v+'  '+t)};const a=s20[n-1],b=s50[n-1];
+ add(P>a?1:-1,P>a?'Price above SMA20':'Price below SMA20');if(b)add(a>b?1:-1,a>b?'SMA20 > SMA50 (uptrend)':'SMA20 < SMA50 (downtrend)');
+ const mu=hs[n-1]>0,mr=hs[n-1]>hs[n-2];add(mu&&mr?1.5:!mu&&!mr?-1.5:0,'MACD hist '+(mu?'+':'-')+(mr?' rising':' falling'));
+ if(ml[n-1]>sg[n-1]&&ml[n-4]<=sg[n-4])add(1,'Fresh MACD bullish cross');else if(ml[n-1]<sg[n-1]&&ml[n-4]>=sg[n-4])add(-1,'Fresh MACD bearish cross');
+ add(R<30?2:R>70?-2:R>50?1:-1,'RSI '+R.toFixed(0)+(R<30?' oversold':R>70?' overbought':''));
+ if(X.adx>25)add(X.pdi>X.mdi?1.5:-1.5,'ADX '+X.adx.toFixed(0)+' strong trend, '+(X.pdi>X.mdi?'+DI':'-DI')+' leads');
+ const pt=pattern(C);if(pt)add(pt[1],'Candle: '+pt[0]);
+ const sh=[],sl_=[];for(let i=Math.max(2,n-150);i<n-2;i++){const x=C[i];if([1,2].every(k=>x.h>=C[i-k].h&&x.h>=C[i+k].h))sh.push(x.h);if([1,2].every(k=>x.l<=C[i-k].l&&x.l<=C[i+k].l))sl_.push(x.l)}
+ const w=C.slice(-20),dn=sl_.filter(v=>v<P*.998),upv=sh.filter(v=>v>P*1.002),sup=dn.length?Math.max(...dn):Math.min(...w.map(x=>x.l)),res=upv.length?Math.min(...upv):Math.max(...w.map(x=>x.h));
+ if(P-sup<.5*atr)add(1,'Price near support');if(res-P<.5*atr)add(-1,'Price near resistance');
+ const sig=sc>=3?'BUY':sc<=-3?'SELL':'HOLD',conf=sig=='HOLD'?Math.round(50+(3-Math.abs(sc))*10):Math.min(95,Math.round(40+Math.abs(sc)*8));
+ const[m1,m2,ms]={Intraday:[1.2,2.4,1.2],Swing:[2,4,1.8],Positional:[3,6,2.5]}[hz];let ent,t1,t2,sl,note;
+ if(sig=='SELL'){ent=[P,Math.min(res,P+.5*atr)].sort((x,y)=>x-y);t1=P-m1*atr;t2=P-m2*atr;sl=P+ms*atr;if(res>P&&res+.25*atr<sl)sl=res+.25*atr;sl=Math.max(sl,P+.6*atr);note='Exit / short-side zone'}
+ else if(sig=='BUY'){ent=[Math.max(sup,P-.5*atr),P];t1=P+m1*atr;t2=P+m2*atr;sl=P-ms*atr;if(sup<P&&sup-.25*atr>sl)sl=sup-.25*atr;sl=Math.min(sl,P-.6*atr);note='Buy zone'}
+ else{ent=[sup,sup+.5*atr];t1=ent[1]+m1*atr;t2=ent[1]+m2*atr;sl=sup-.5*atr;note='Wait: dip-buy zone near support'}
+ const mid=(ent[0]+ent[1])/2,rr=Math.abs(t1-mid)/(Math.abs(mid-sl)||1);
+ const log=[['Technical',`RSI ${R.toFixed(0)}, MACD hist ${hs[n-1].toFixed(3)}, ADX ${X.adx.toFixed(0)}, ATR ${atr.toFixed(2)}`],['Levels',`Support ${f(sup)} / Resistance ${f(res)}`],['Risk',`${note} ${f(ent[0])}-${f(ent[1])}, SL ${f(sl)}, R:R ${rr.toFixed(2)}`],['Advisor',`${sig} (score ${sc}, confidence ${conf}%)`]];
+ return{sig,sc,conf,P,atr,R,X,macd:ml[n-1],msig:sg[n-1],hist:hs[n-1],s20:a,s50:b,e12:e12[n-1],e26:e26[n-1],sup,res,ent,t1,t2,sl,rr,L,pt,note,log}}
+/* ---------- UI ---------- */
+const badge=a=>a?`<span class="bd ${a.sig}">${a.sig}</span>`:'<span class="m">…</span>';
+function renderWL(){$('#tb').innerHTML=S.syms.map(s=>{const q=Q[s];if(!q)return`<tr data-s="${s}"><td><b>${s}</b><td colspan="8" class="m">waiting for data…`;
+ const ch=q.p-q.prev,pc=q.prev?ch/q.prev*100:0,cl=ch>0?'g':ch<0?'r':'',a=sigs[s];
+ return`<tr data-s="${s}" class="${s==sel?'sel ':''}${q.dir>0?'u':q.dir<0?'d':''}"><td><b>${s}</b><td class="n p">${f(q.p)}<td class="n ${cl}">${sgn(ch)}<td class="n ${cl}">${sgn(pc)}%<td class="n">${f(q.h)}<td class="n">${f(q.l)}<td>${a?f(a.ent[0])+' – '+f(a.ent[1]):'-'}<td>${badge(a)}<td><a data-x="${s}" class="m">✕</a>`}).join('')}
+function renderDetail(){const q=Q[sel];if(!q){$('#hs').textContent='No market data yet';$('#hr').innerHTML='<div style="color:#ffd166;max-width:620px"><b>Nothing received from PSX.</b> Browsers usually block a local file from calling PSX. Fix: put <b>psx_proxy.py</b> next to this file, run <code>python psx_proxy.py</code>, then open <b>http://localhost:8000/psx_pulse.html</b>. (Or click Demo to preview with simulated prices.)<div class="m" style="margin-top:6px;font-size:11px">Diagnostics: '+(dbg.length?dbg.slice(-6).map(esc).join('<br>'):'waiting for first response…')+'</div></div>';return}const hz=hzOf(sel),A=H[sel]?analyze(cand(sel,TF[hz]),hz):null;cur=A;sigs[sel]=A;
+ const ch=q.p-q.prev,pc=q.prev?ch/q.prev*100:0,cl=ch>0?'g':ch<0?'r':'';
+ $('#hs').textContent=sel+(H[sel]&&H[sel].demo?' (demo history)':'');$('#hp').textContent=f(q.p);$('#hc').innerHTML=`<span class="${cl}">${sgn(ch)} (${sgn(pc)}%)</span>`;
+ $('#hr').innerHTML=`Open ${f(q.o)} · High ${f(q.h)} · Low ${f(q.l)} · Prev ${f(q.prev)} · Vol ${q.v?q.v.toLocaleString():'-'}`;$('#hb').innerHTML=badge(A);
+ if(!A){$('#pl').innerHTML=$('#lv').innerHTML=$('#ind').innerHTML='<span class="m">Not enough candles for this horizon yet…</span>';draw();return}
+ $('#pl').innerHTML=`<h4>Trade plan · ${hz}</h4><div class="kv"><span>Signal now</span><span>${badge(A)} ${A.conf}%</span></div><div class="m">${A.note}</div><div class="zone">Entry zone ${f(A.ent[0])} – ${f(A.ent[1])}</div>
+ <div class="kv"><span>Target 1</span><b class="g">${f(A.t1)}</b></div><div class="kv"><span>Target 2</span><b class="g">${f(A.t2)}</b></div><div class="kv"><span>Stop loss</span><b class="r">${f(A.sl)}</b></div><div class="kv"><span>Reward : Risk</span><b>${A.rr.toFixed(2)}</b></div>`;
+ $('#lv').innerHTML=`<h4>Levels & patterns</h4><div class="kv"><span>Resistance</span><b style="color:#ff9f43">${f(A.res)}</b></div><div class="kv"><span>Support</span><b style="color:#54a0ff">${f(A.sup)}</b></div><div class="kv"><span>Candle</span><span>${A.pt?A.pt[0]:'none'}</span></div><h4 style="margin-top:8px">Score breakdown (${A.sc})</h4>${A.L.map(x=>`<div class="m">${x}</div>`).join('')}`;
+ $('#ind').innerHTML=`<h4>Indicators (${TF[hz]} candles)</h4>${[['RSI 14',A.R.toFixed(1)],['MACD / Signal',A.macd.toFixed(3)+' / '+A.msig.toFixed(3)],['MACD hist',A.hist.toFixed(3)],['ADX · +DI · -DI',[A.X.adx,A.X.pdi,A.X.mdi].map(v=>v.toFixed(0)).join(' · ')],['SMA 20 / 50',f(A.s20)+' / '+f(A.s50)],['EMA 12 / 26',f(A.e12)+' / '+f(A.e26)],['ATR 14',f(A.atr)]].map(r=>`<div class="kv"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}`;
+ const col={Data:'#4fc3f7',Technical:'#ffc048',Levels:'#54a0ff',Risk:'#ff9f43',Advisor:'#4be28f'};
+ $('#lg').innerHTML='<h4>Agent activity</h4>'+[['Data',`${feed.live?feed.n+' live quotes from PSX':'simulated ticks'} @ ${new Date().toLocaleTimeString()}`],...A.log].map(l=>`<div><b style="color:${col[l[0]]}">[${l[0]}]</b> ${l[1]}</div>`).join('');draw()}
+function draw(){const C=cand(sel,tf),cv=$('#cv'),r=cv.getBoundingClientRect(),d=devicePixelRatio||1;if(!C.length||!r.width)return;cv.width=r.width*d;cv.height=r.height*d;const g=cv.getContext('2d');g.scale(d,d);
+ const W=r.width,Hh=r.height,pr=62,pb=20,pt=8,V=Math.min(C.length,Math.floor((W-pr)/7)),V0=C.length-V,vis=C.slice(V0),last=vis[vis.length-1].c,c=C.map(x=>x.c),s20=sma(c,20),s50=sma(c,50);
+ let hi=Math.max(...vis.map(x=>x.h)),lo=Math.min(...vis.map(x=>x.l));const lv=[],A=cur,near=v=>Math.abs(v/last-1)<.12;
+ if(A){[['R',A.res,'#ff9f43'],['S',A.sup,'#54a0ff'],['SL',A.sl,'#ff6b6b'],['T1',A.t1,'#4be28f'],['T2',A.t2,'#1dd1a1']].forEach(([n,v,k])=>{if(near(v)){lv.push([n,v,k]);hi=Math.max(hi,v);lo=Math.min(lo,v)}})}
+ const ze=A&&near(A.ent[0])&&near(A.ent[1]);if(ze){hi=Math.max(hi,A.ent[1]);lo=Math.min(lo,A.ent[0])}
+ const y=v=>pt+(hi-v)/(hi-lo||1)*(Hh-pb-pt),dx=(W-pr)/V,bw=Math.max(2,dx*.65);g.font='11px system-ui';g.textBaseline='middle';
+ for(let i=0;i<=5;i++){const v=lo+(hi-lo)*i/5;g.strokeStyle='#ffffff12';g.beginPath();g.moveTo(0,y(v));g.lineTo(W-pr,y(v));g.stroke();g.fillStyle='#7fb89b';g.fillText(v.toFixed(2),W-pr+4,y(v))}
+ if(ze){g.fillStyle='#2ee57a30';g.fillRect(0,y(A.ent[1]),W-pr,Math.max(3,y(A.ent[0])-y(A.ent[1])));g.fillStyle='#8dffc0';g.fillText('ENTRY ZONE',6,y((A.ent[0]+A.ent[1])/2))}
+ lv.forEach(([n,v,k])=>{g.strokeStyle=k;g.setLineDash([5,4]);g.beginPath();g.moveTo(0,y(v));g.lineTo(W-pr,y(v));g.stroke();g.setLineDash([]);g.fillStyle=k;g.fillText(n+' '+v.toFixed(2),W-pr+4,y(v)-7)});
+ vis.forEach((x,i)=>{const X=i*dx+dx/2,col=x.c>=x.o?'#2ee57a':'#ff5c5c';g.strokeStyle=g.fillStyle=col;g.beginPath();g.moveTo(X,y(x.h));g.lineTo(X,y(x.l));g.stroke();g.fillRect(X-bw/2,Math.min(y(x.o),y(x.c)),bw,Math.max(1,Math.abs(y(x.o)-y(x.c))))});
+ [[s20,'#ffc048'],[s50,'#4fc3f7']].forEach(([m,k])=>{g.strokeStyle=k;g.lineWidth=1.3;g.beginPath();let s=0;vis.forEach((_,i)=>{const v=m[V0+i];if(v==null)return;const X=i*dx+dx/2;s?g.lineTo(X,y(v)):g.moveTo(X,y(v));s=1});g.stroke();g.lineWidth=1});
+ g.fillStyle='#7fb89b';const intra=tf=='5m'||tf=='1H',st=Math.max(1,Math.floor(V/5));for(let i=0;i<V;i+=st){const D=new Date(vis[i].t);g.fillText(intra?D.toLocaleString([],{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}):D.toLocaleDateString([],{day:'2-digit',month:'short',year:'2-digit'}),i*dx,Hh-8)}
+ g.fillStyle='#ffc048';g.fillText('SMA20',6,12);g.fillStyle='#4fc3f7';g.fillText('SMA50',52,12)}
+function status(){const t=feed.at?new Date(feed.at).toLocaleTimeString():'';const mo=(()=>{const q=new Date(Date.now()+18e6),d=q.getUTCDay(),m=q.getUTCHours()*60+q.getUTCMinutes();return d>0&&d<6&&m>=555&&m<=990})(),mk=mo?'<span class="g"> · Market OPEN</span>':'<span style="color:#ffd166"> · Market CLOSED – showing last close</span>';$('#st').innerHTML=S.demo?'<span style="color:#ffd166">● DEMO MODE (simulated prices)</span>':feed.live?`<span class="g">● LIVE · PSX Data Portal · ${t}</span>${mk}`:Object.keys(Q).length?`<span style="color:#ffd166">● Offline · showing last saved prices (${t||'earlier'}) · retrying…</span>`:'<span class="r">● Cannot reach PSX data · retrying… (see Proxy button, or serve this file via http://localhost)</span>'}
+/* ---------- wiring ---------- */
+$('#hz').innerHTML=Object.keys(TF).map(k=>`<option>${k}`).join('');$('#hz').value=hzOf(sel);
+$('#hz').onchange=e=>{S.hz[sel]=e.target.value;save();renderDetail()};
+$('#tfs').innerHTML=['5m','1H','D','W','M'].map(t=>`<button data-t="${t}" class="${t==tf?'on':''}">${t=='D'?'Daily':t=='W'?'Weekly':t=='M'?'Monthly':t}</button>`).join('');
+$('#tfs').onclick=e=>{const t=e.target.dataset.t;if(!t)return;tf=t;[...$('#tfs').children].forEach(b=>b.classList.toggle('on',b.dataset.t==t));draw()};
+$('#tb').onclick=e=>{const x=e.target.dataset.x;if(x){S.syms=S.syms.filter(s=>s!=x);if(sel==x)sel=S.syms[0];save();renderWL();return}const tr=e.target.closest('tr');if(tr&&tr.dataset.s){sel=tr.dataset.s;$('#hz').value=hzOf(sel);renderWL();loadH(sel,true).then(renderDetail)}};
+$('#ab').onclick=()=>{const s=$('#ai').value.trim().toUpperCase();if(/^[A-Z0-9]{2,12}$/.test(s)&&!S.syms.includes(s)){S.syms.push(s);save();$('#ai').value='';pollQuotes().then(renderWL)}};
+$('#ai').onkeydown=e=>{if(e.key=='Enter')$('#ab').click()};
+$('#px').onclick=()=>{const v=prompt('CORS proxy prefix (the PSX URL will be URL-encoded and appended). Example: https://corsproxy.io/?url=\nLeave empty for direct access.',S.proxy);if(v!=null){S.proxy=v.trim();save();Object.keys(H).forEach(k=>delete H[k])}};
+$('#dm').onclick=()=>{S.demo=!S.demo;Object.keys(Q).forEach(k=>delete Q[k]);save();$('#dm').classList.toggle('on',S.demo);$('#dm').textContent='Demo: '+(S.demo?'on':'off');Object.keys(H).forEach(k=>delete H[k])};
+$('#dm').classList.toggle('on',S.demo);$('#dm').textContent='Demo: '+(S.demo?'on':'off');
+async function loop(){await pollQuotes();status();renderWL();renderDetail()}
+if(!S.demo)try{Object.assign(Q,JSON.parse(localStorage.getItem('psx_q')||'{}'));feed.at=+localStorage.getItem('psx_qt')||0;Object.values(Q).forEach(q=>q.dir=0)}catch(e){}
+(async()=>{await pollQuotes();status();renderWL();await loadH(sel,true);renderDetail();setInterval(loop,2000);setInterval(()=>loadH(sel).then(renderDetail),8000);
+ setInterval(async()=>{const s=S.syms[idx++%S.syms.length];if(!Q[s])return;await loadH(s);if(s!=sel){const hz=hzOf(s);sigs[s]=analyze(cand(s,TF[hz]),hz)}},1200)})();
+addEventListener('resize',draw);
+</script></body></html>
