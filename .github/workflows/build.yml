@@ -1,3 +1,5 @@
+runs-on: ubuntu-latest to runs-on: ubuntu-24.04
+actions/setup-java@v4 to actions/setup-java@v5
 name: Build APK
 on:
   push:
